@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kubera – Inventario MercadoLibre</title>
+  <link rel="stylesheet" href="https://cdn.datatables.net/2.0.8/css/dataTables.dataTables.min.css">
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e4e4e7;
+      --muted: #71717a;
+      --accent: #3b82f6;
+      --green: #22c55e;
+      --yellow: #eab308;
+      --red: #ef4444;
+      --purple: #a78bfa;
+      --cyan: #06b6d4;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 6px; }
+    .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 0; margin-bottom: 0; border-bottom: 2px solid var(--border); }
+    .tab {
+      padding: 10px 24px; cursor: pointer; color: var(--muted);
+      border-bottom: 2px solid transparent; margin-bottom: -2px;
+      font-weight: 500; transition: all .2s; background: none;
+      border-top: none; border-left: none; border-right: none; font-size: 0.95rem;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-panel { display: none; padding-top: 20px; }
+    .tab-panel.active { display: block; }
+
+    /* Stats */
+    .stats { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px 18px; min-width: 130px;
+    }
+    .stat-card .label { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-card .value { font-size: 1.3rem; font-weight: 700; margin-top: 4px; }
+
+    /* Filters */
+    .filters {
+      display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
+    }
+    .filter-group { display: flex; align-items: center; gap: 6px; }
+    .filter-group label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .filter-group select {
+      background: var(--surface); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; cursor: pointer;
+    }
+
+    /* Tags */
+    .tag {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .tag-active { background: rgba(34,197,94,0.15); color: var(--green); }
+    .tag-paused { background: rgba(234,179,8,0.15); color: var(--yellow); }
+    .tag-closed { background: rgba(239,68,68,0.15); color: var(--red); }
+    .tag-inactive { background: rgba(113,113,122,0.15); color: var(--muted); }
+    .tag-fulfillment { background: rgba(6,182,212,0.15); color: var(--cyan); }
+    .tag-cross_docking { background: rgba(167,139,250,0.15); color: var(--purple); }
+    .tag-drop_off { background: rgba(234,179,8,0.15); color: var(--yellow); }
+    .tag-unknown { background: rgba(113,113,122,0.15); color: var(--muted); }
+
+    /* Loading */
+    .loading { text-align: center; padding: 60px; color: var(--muted); }
+    .spinner {
+      display: inline-block; width: 32px; height: 32px;
+      border: 3px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* DataTables dark theme */
+    table.dataTable {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden;
+      border-collapse: collapse !important; width: 100% !important;
+    }
+    table.dataTable thead th {
+      background: var(--surface); color: var(--muted);
+      border-bottom: 1px solid var(--border) !important;
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 10px 12px !important; white-space: nowrap;
+    }
+    table.dataTable tbody td {
+      padding: 8px 12px !important; border-bottom: 1px solid var(--border) !important;
+      font-size: 0.82rem; color: var(--text);
+    }
+    table.dataTable tbody tr:hover td { background: rgba(59,130,246,0.06) !important; }
+    table.dataTable tbody tr.even td,
+    table.dataTable tbody tr.odd td { background: transparent; }
+    .dt-container .dt-search input,
+    .dt-container .dt-length select {
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
+    }
+    .dt-container .dt-search label,
+    .dt-container .dt-length label,
+    .dt-container .dt-info { color: var(--muted) !important; font-size: 0.8rem; }
+    .dt-container .dt-paging button {
+      background: var(--surface) !important; color: var(--text) !important;
+      border: 1px solid var(--border) !important; border-radius: 4px !important; margin: 0 2px;
+    }
+    .dt-container .dt-paging button.dt-paging-button.current {
+      background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important;
+    }
+
+    .stock-high { color: var(--green); font-weight: 600; }
+    .stock-mid  { color: var(--yellow); font-weight: 600; }
+    .stock-low  { color: var(--red); font-weight: 600; }
+    .stock-odoo { color: var(--purple); font-weight: 600; }
+    .sku-cell   { font-family: monospace; font-size: 0.78rem; color: var(--accent); }
+    .dim-cell   { font-size: 0.72rem; color: var(--muted); }
+    .wh-cell    { font-family: monospace; font-size: 0.78rem; color: var(--cyan); }
+  </style>
+</head>
+<body>
+  <div style="display:flex; align-items:center; gap:16px; margin-bottom:6px;">
+    <h1>Inventario MercadoLibre</h1>
+    <a href="/estrella" style="color:var(--accent); font-size:0.85rem; text-decoration:none; border:1px solid var(--border); padding:4px 12px; border-radius:6px;">Productos Estrella →</a>
+  </div>
+  <p class="subtitle" id="fecha">Cargando datos...</p>
+
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <div>Consultando MercadoLibre, Odoo y bodegas — esto puede tomar unos segundos...</div>
+  </div>
+
+  <div id="content" style="display:none">
+    <div class="tabs" id="tabs"></div>
+    <div id="panels"></div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
+  <script>
+    // Store references per tab
+    const tabState = [];
+
+    async function loadDashboard() {
+      try {
+        const resp = await fetch('/api/dashboard/ml');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        document.getElementById('fecha').textContent =
+          `Actualizado: ${new Date(data.fecha_consulta).toLocaleString('es-MX')}`;
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('content').style.display = 'block';
+
+        const tabsEl = document.getElementById('tabs');
+        const panelsEl = document.getElementById('panels');
+
+        data.cuentas.forEach((cuenta, idx) => {
+          // Tab button
+          const btn = document.createElement('button');
+          btn.className = 'tab' + (idx === 0 ? ' active' : '');
+          btn.textContent = `${cuenta.cuenta} (${cuenta.total_items})`;
+          btn.onclick = () => switchTab(idx);
+          tabsEl.appendChild(btn);
+
+          // Collect unique values for filters
+          const statuses = [...new Set(cuenta.rows.map(r => r.status))].sort();
+          const types = [...new Set(cuenta.rows.map(r => r.logistic_type))].sort();
+          const warehouses = [...new Set(cuenta.rows.map(r => r.warehouse))].sort();
+
+          // Panel
+          const panel = document.createElement('div');
+          panel.className = 'tab-panel' + (idx === 0 ? ' active' : '');
+          panel.id = `panel-${idx}`;
+          panel.innerHTML = `
+            <div class="stats" id="stats-${idx}"></div>
+            <div class="filters">
+              <div class="filter-group">
+                <label>Estado</label>
+                <select id="filter-status-${idx}">
+                  <option value="">Todos</option>
+                  ${statuses.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+              </div>
+              <div class="filter-group">
+                <label>Tipo</label>
+                <select id="filter-type-${idx}">
+                  <option value="">Todos</option>
+                  ${types.map(t => `<option value="${t}">${typeLabel(t)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="filter-group">
+                <label>Bodega</label>
+                <select id="filter-wh-${idx}">
+                  <option value="">Todas</option>
+                  ${warehouses.map(w => `<option value="${w}">${w}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <table id="table-${idx}" class="display" style="width:100%">
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Titulo</th>
+                  <th>Estado</th>
+                  <th>Tipo</th>
+                  <th>Bodega</th>
+                  <th>Publicado</th>
+                  <th>Dias</th>
+                  <th>Uds 30d</th>
+                  <th>$Venta 30d</th>
+                  <th>Stock Full</th>
+                  <th>Stock Odoo</th>
+                  <th>Precio</th>
+                  <th>Dimensiones</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          `;
+          panelsEl.appendChild(panel);
+
+          // Build table data
+          const tableData = cuenta.rows.map(r => [
+            `<span class="sku-cell">${esc(r.sku)}</span>`,
+            esc(r.title),
+            statusTag(r.status),
+            typeTag(r.logistic_type),
+            `<span class="wh-cell">${esc(r.warehouse)}</span>`,
+            r.start_time ? new Date(r.start_time).toLocaleDateString('es-MX') : '—',
+            r.days_published ?? '—',
+            r.monthly_sales,
+            r.monthly_revenue ? `$${Number(r.monthly_revenue).toLocaleString('es-MX', {maximumFractionDigits:0})}` : '$0',
+            stockCell(r.stock_full),
+            odooCell(r.stock_odoo),
+            r.price ? `$${Number(r.price).toLocaleString()}` : '—',
+            `<span class="dim-cell">${esc(r.dimensions)}</span>`,
+          ]);
+
+          const dt = $(`#table-${idx}`).DataTable({
+            data: tableData,
+            order: [[8, 'desc']],
+            pageLength: 50,
+            language: {
+              search: 'Buscar:',
+              lengthMenu: 'Mostrar _MENU_',
+              info: '_START_–_END_ de _TOTAL_',
+              paginate: { previous: '<', next: '>' },
+            },
+            columnDefs: [
+              { targets: [6, 7, 8, 9, 10, 11], className: 'dt-right' },
+            ],
+          });
+
+          // Save state
+          tabState.push({ dt, rows: cuenta.rows });
+
+          // Wire up filters
+          const applyFilters = () => {
+            const sf = $(`#filter-status-${idx}`).val();
+            const tf = $(`#filter-type-${idx}`).val();
+            const wf = $(`#filter-wh-${idx}`).val();
+
+            // Custom search per column
+            dt.column(2).search(sf ? `^${escRegex(sf)}$` : '', true, false);
+            dt.column(3).search(tf ? `^${escRegex(typeLabel(tf))}$` : '', true, false);
+            dt.column(4).search(wf ? escRegex(wf) : '', true, false);
+            dt.draw();
+            updateStats(idx);
+          };
+
+          $(`#filter-status-${idx}, #filter-type-${idx}, #filter-wh-${idx}`).on('change', applyFilters);
+
+          // Initial stats
+          updateStats(idx);
+        });
+      } catch (err) {
+        document.getElementById('loading').innerHTML =
+          `<div style="color:var(--red)">Error: ${err.message}</div>`;
+      }
+    }
+
+    function updateStats(idx) {
+      const { dt, rows } = tabState[idx];
+      // Get filtered row indices
+      const filteredIndices = dt.rows({ search: 'applied' }).indexes().toArray();
+      const filtered = filteredIndices.map(i => rows[i]);
+
+      const total = filtered.length;
+      const active = filtered.filter(r => r.status === 'active').length;
+      const fullItems = filtered.filter(r => r.logistic_type === 'fulfillment').length;
+      const activeFullItems = filtered.filter(r => r.status === 'active' && r.logistic_type === 'fulfillment').length;
+      const totalStockFull = filtered.reduce((s, r) => s + r.stock_full, 0);
+      const totalStockOdoo = filtered.reduce((s, r) => s + r.stock_odoo, 0);
+      const totalSalesUnits = filtered.reduce((s, r) => s + r.monthly_sales, 0);
+      const totalSalesRevenue = filtered.reduce((s, r) => s + r.monthly_revenue, 0);
+
+      document.getElementById(`stats-${idx}`).innerHTML = `
+        <div class="stat-card">
+          <div class="label">Productos</div>
+          <div class="value">${total}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Activos</div>
+          <div class="value" style="color:var(--green)">${active}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Activos Full</div>
+          <div class="value" style="color:var(--cyan)">${activeFullItems}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Stock Full</div>
+          <div class="value" style="color:var(--cyan)">${totalStockFull.toLocaleString()}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Stock Odoo</div>
+          <div class="value" style="color:var(--purple)">${totalStockOdoo.toLocaleString()}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Uds 30d</div>
+          <div class="value" style="color:var(--accent)">${totalSalesUnits.toLocaleString()}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">$Venta 30d</div>
+          <div class="value" style="color:var(--green)">$${totalSalesRevenue.toLocaleString('es-MX', {maximumFractionDigits:0})}</div>
+        </div>
+      `;
+    }
+
+    function switchTab(idx) {
+      document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', i === idx));
+      document.querySelectorAll('.tab-panel').forEach((p, i) => p.classList.toggle('active', i === idx));
+      $.fn.dataTable.tables({ visible: true, api: true }).columns.adjust();
+    }
+
+    function statusTag(s) {
+      const cls = { active: 'tag-active', paused: 'tag-paused', closed: 'tag-closed', inactive: 'tag-inactive' }[s] || 'tag-inactive';
+      return `<span class="tag ${cls}">${s}</span>`;
+    }
+
+    function typeLabel(t) {
+      return { fulfillment: 'Full', cross_docking: 'Drop', drop_off: 'DropOff' }[t] || t;
+    }
+
+    function typeTag(t) {
+      const label = typeLabel(t);
+      const cls = `tag-${t}`;
+      return `<span class="tag ${cls}">${label}</span>`;
+    }
+
+    function stockCell(qty) {
+      if (!qty) return `<span class="stock-low">0</span>`;
+      const cls = qty >= 50 ? 'stock-high' : qty >= 10 ? 'stock-mid' : 'stock-low';
+      return `<span class="${cls}">${qty.toLocaleString()}</span>`;
+    }
+
+    function odooCell(qty) {
+      if (!qty) return `<span class="stock-low">0</span>`;
+      const cls = qty >= 50 ? 'stock-odoo' : qty >= 10 ? 'stock-mid' : 'stock-low';
+      return `<span class="${cls}">${Number(qty).toLocaleString()}</span>`;
+    }
+
+    function esc(s) {
+      if (!s) return '—';
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function escRegex(s) {
+      return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    loadDashboard();
+  </script>
+</body>
+</html>

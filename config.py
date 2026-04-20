@@ -1,0 +1,29 @@
+"""Shared configuration – env vars and ML account setup."""
+
+import os
+import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load env vars from sales-dashboard/.env
+_env_path = Path(__file__).resolve().parent.parent / "sales-dashboard" / ".env"
+load_dotenv(_env_path)
+
+# Make ml_token_manager importable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sales-dashboard"))
+from ml_token_manager import MLTokenManager  # noqa: E402
+
+# -- MercadoLibre --
+CUENTAS = ["BEKURA", "SANCORFASHION"]
+
+
+def get_ml_manager(cuenta: str) -> MLTokenManager:
+    return MLTokenManager(table="ml_tokens_dashboard", cuenta=cuenta)
+
+
+# -- Odoo --
+ODOO_URL = os.environ.get("ODOO_URL", "")
+ODOO_DB = os.environ.get("ODOO_DB", "")
+ODOO_USER = os.environ.get("ODOO_USER", "")
+ODOO_PASSWORD = os.environ.get("ODOO_PASSWORD", "")

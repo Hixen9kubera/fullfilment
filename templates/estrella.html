@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kubera – Productos Estrella</title>
+  <link rel="stylesheet" href="https://cdn.datatables.net/2.0.8/css/dataTables.dataTables.min.css">
+  <style>
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+      --text: #e4e4e7; --muted: #71717a; --accent: #3b82f6;
+      --green: #22c55e; --yellow: #eab308; --red: #ef4444;
+      --purple: #a78bfa; --cyan: #06b6d4; --orange: #f97316;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+      background: var(--bg); color: var(--text); padding: 24px;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    h1 { font-size: 1.5rem; margin-bottom: 6px; }
+    .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; }
+    .nav { margin-bottom: 16px; font-size: 0.85rem; }
+
+    /* Tabs */
+    .tabs { display:flex; gap:0; margin-bottom:0; border-bottom:2px solid var(--border); }
+    .tab {
+      padding:10px 24px; cursor:pointer; color:var(--muted);
+      border-bottom:2px solid transparent; margin-bottom:-2px;
+      font-weight:500; transition:all .2s; background:none;
+      border-top:none; border-left:none; border-right:none; font-size:0.95rem;
+    }
+    .tab:hover { color:var(--text); }
+    .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .tab-panel { display:none; padding-top:20px; }
+    .tab-panel.active { display:block; }
+
+    /* Stats */
+    .stats { display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+    .stat-card {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:8px; padding:14px 18px; min-width:130px;
+    }
+    .stat-card .label { color:var(--muted); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; }
+    .stat-card .value { font-size:1.3rem; font-weight:700; margin-top:4px; }
+
+    /* Controls */
+    .controls { display:flex; gap:12px; margin-bottom:16px; align-items:center; flex-wrap:wrap; }
+    .toggle-group { display:flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+    .toggle-btn {
+      padding:6px 16px; cursor:pointer; background:var(--surface);
+      color:var(--muted); border:none; font-size:0.85rem; font-weight:500;
+      transition:all .2s;
+    }
+    .toggle-btn.active { background:var(--accent); color:#fff; }
+    .pareto-info {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:8px; padding:12px 16px; margin-bottom:16px;
+      font-size:0.85rem; color:var(--muted);
+    }
+    .pareto-info strong { color:var(--text); }
+    .pareto-info .highlight { color:var(--accent); font-weight:600; }
+
+    /* Loading */
+    .loading { text-align:center; padding:60px; color:var(--muted); }
+    .spinner {
+      display:inline-block; width:32px; height:32px;
+      border:3px solid var(--border); border-top-color:var(--accent);
+      border-radius:50%; animation:spin 0.8s linear infinite; margin-bottom:12px;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* Tags */
+    .tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:0.7rem; font-weight:600; text-transform:uppercase; }
+    .tag-active { background:rgba(34,197,94,0.15); color:var(--green); }
+    .tag-paused { background:rgba(234,179,8,0.15); color:var(--yellow); }
+    .tag-closed { background:rgba(239,68,68,0.15); color:var(--red); }
+    .tag-inactive { background:rgba(113,113,122,0.15); color:var(--muted); }
+
+    /* DataTables dark theme */
+    table.dataTable { background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; border-collapse:collapse !important; width:100% !important; }
+    table.dataTable thead th { background:var(--surface); color:var(--muted); border-bottom:1px solid var(--border) !important; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; padding:10px 12px !important; white-space:nowrap; }
+    table.dataTable tbody td { padding:8px 12px !important; border-bottom:1px solid var(--border) !important; font-size:0.82rem; color:var(--text); }
+    table.dataTable tbody tr:hover td { background:rgba(59,130,246,0.06) !important; }
+    table.dataTable tbody tr.even td, table.dataTable tbody tr.odd td { background:transparent; }
+    .dt-container .dt-search input, .dt-container .dt-length select { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 10px; }
+    .dt-container .dt-search label, .dt-container .dt-length label, .dt-container .dt-info { color:var(--muted) !important; font-size:0.8rem; }
+    .dt-container .dt-paging button { background:var(--surface) !important; color:var(--text) !important; border:1px solid var(--border) !important; border-radius:4px !important; margin:0 2px; }
+    .dt-container .dt-paging button.dt-paging-button.current { background:var(--accent) !important; border-color:var(--accent) !important; color:#fff !important; }
+
+    .sku-cell { font-family:monospace; font-size:0.78rem; color:var(--accent); }
+    .pct-bar { display:inline-block; height:14px; border-radius:3px; background:var(--accent); opacity:0.7; vertical-align:middle; min-width:2px; }
+    .cum-text { font-size:0.75rem; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="nav"><a href="/">← Inventario</a></div>
+  <h1>Productos Estrella</h1>
+  <p class="subtitle" id="fecha">Cargando ventas históricas de todas las cuentas...</p>
+
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <div>Descargando todas las órdenes históricas — esto toma ~1 minuto...</div>
+  </div>
+
+  <div id="content" style="display:none">
+    <div class="tabs" id="tabs"></div>
+    <div id="panels"></div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
+  <script>
+    let allData = null;
+    let currentMode = 'units'; // 'units' or 'revenue'
+    const tabState = [];
+
+    async function loadEstrella() {
+      try {
+        const resp = await fetch('/api/dashboard/estrella');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        allData = await resp.json();
+
+        document.getElementById('fecha').textContent =
+          `Actualizado: ${new Date(allData.fecha_consulta).toLocaleString('es-MX')}`;
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('content').style.display = 'block';
+
+        buildTabs();
+      } catch (err) {
+        document.getElementById('loading').innerHTML =
+          `<div style="color:var(--red)">Error: ${err.message}</div>`;
+      }
+    }
+
+    function buildTabs() {
+      const tabsEl = document.getElementById('tabs');
+      const panelsEl = document.getElementById('panels');
+      tabsEl.innerHTML = '';
+      panelsEl.innerHTML = '';
+      tabState.length = 0;
+
+      // Tab definitions: consolidated + per account
+      const views = [
+        { label: `Todas (${allData.consolidado.unique_products})`, data: allData.consolidado, isCombined: true },
+        ...allData.cuentas.map(c => ({
+          label: `${c.cuenta} (${c.unique_products})`,
+          data: c,
+          isCombined: false,
+        })),
+      ];
+
+      views.forEach((view, idx) => {
+        const btn = document.createElement('button');
+        btn.className = 'tab' + (idx === 0 ? ' active' : '');
+        btn.textContent = view.label;
+        btn.onclick = () => switchTab(idx);
+        tabsEl.appendChild(btn);
+
+        const panel = document.createElement('div');
+        panel.className = 'tab-panel' + (idx === 0 ? ' active' : '');
+        panel.id = `ep-${idx}`;
+        panel.innerHTML = `
+          <div class="stats" id="estats-${idx}"></div>
+          <div class="controls">
+            <div class="toggle-group">
+              <button class="toggle-btn active" id="btn-units-${idx}" onclick="setMode('units', ${idx})">Unidades</button>
+              <button class="toggle-btn" id="btn-revenue-${idx}" onclick="setMode('revenue', ${idx})">$ Ingresos</button>
+            </div>
+          </div>
+          <div class="pareto-info" id="pareto-${idx}"></div>
+          <table id="etable-${idx}" class="display" style="width:100%">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>SKU</th>
+                <th>Titulo</th>
+                ${view.isCombined ? '<th>Cuentas</th>' : ''}
+                <th>Uds vendidas</th>
+                <th>$ Ingresos</th>
+                <th>% Share</th>
+                <th>% Acumulado</th>
+                <th>Prom/mes uds</th>
+                <th>Prom/mes $</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        `;
+        panelsEl.appendChild(panel);
+
+        const products = view.data.products;
+        const hasCuentas = view.isCombined;
+
+        const tableData = products.map((p, i) => {
+          const row = [
+            i + 1,
+            `<span class="sku-cell">${esc(p.sku)}</span>`,
+            esc(p.title),
+          ];
+          if (hasCuentas) {
+            row.push(p.cuentas ? p.cuentas.map(c => c.substring(0, 3)).join(', ') : '—');
+          }
+          row.push(
+            p.units_sold.toLocaleString(),
+            `$${Number(p.revenue).toLocaleString('es-MX', {maximumFractionDigits:0})}`,
+            `<span class="pct-bar" style="width:${Math.min(p.pct_units * 3, 100)}px"></span> ${p.pct_units.toFixed(1)}%`,
+            `<span class="cum-text">${p.cum_pct_units}%</span>`,
+            p.avg_monthly_units.toLocaleString(),
+            `$${Number(p.avg_monthly_revenue).toLocaleString('es-MX', {maximumFractionDigits:0})}`,
+          );
+          return row;
+        });
+
+        const colOffset = hasCuentas ? 1 : 0;
+        const dt = $(`#etable-${idx}`).DataTable({
+          data: tableData,
+          order: [[3 + colOffset, 'desc']],
+          pageLength: 50,
+          language: {
+            search: 'Buscar:', lengthMenu: 'Mostrar _MENU_',
+            info: '_START_–_END_ de _TOTAL_',
+            paginate: { previous: '<', next: '>' },
+          },
+          columnDefs: [
+            { targets: [0], className: 'dt-center', width: '30px' },
+            { targets: [3 + colOffset, 4 + colOffset, 5 + colOffset, 6 + colOffset, 7 + colOffset, 8 + colOffset], className: 'dt-right' },
+          ],
+        });
+
+        tabState.push({ dt, products, isCombined: hasCuentas, colOffset, view: view.data });
+        updateStats(idx);
+        updatePareto(idx);
+      });
+    }
+
+    function setMode(mode, idx) {
+      currentMode = mode;
+      const { dt, colOffset } = tabState[idx];
+
+      // Update toggle buttons for this panel
+      document.getElementById(`btn-units-${idx}`).classList.toggle('active', mode === 'units');
+      document.getElementById(`btn-revenue-${idx}`).classList.toggle('active', mode === 'revenue');
+
+      // Re-sort: units col = 3+offset, revenue col = 4+offset
+      const sortCol = mode === 'units' ? 3 + colOffset : 4 + colOffset;
+      dt.order([sortCol, 'desc']).draw();
+
+      const { products } = tabState[idx];
+
+      // Rebuild bar widths
+      dt.rows().every(function(rowIdx) {
+        const p = products[rowIdx];
+        const pct = mode === 'units' ? p.pct_units : p.pct_revenue;
+        const cum = mode === 'units' ? p.cum_pct_units : p.cum_pct_revenue;
+        const shareCol = 5 + colOffset;
+        const cumCol = 6 + colOffset;
+        this.cell(rowIdx, shareCol).data(`<span class="pct-bar" style="width:${Math.min(pct * 3, 100)}px"></span> ${pct.toFixed(1)}%`);
+        this.cell(rowIdx, cumCol).data(`<span class="cum-text">${cum}%</span>`);
+      });
+      dt.draw(false);
+      updatePareto(idx);
+    }
+
+    function updateStats(idx) {
+      const { view } = tabState[idx];
+      const d = view;
+      document.getElementById(`estats-${idx}`).innerHTML = `
+        <div class="stat-card">
+          <div class="label">Órdenes totales</div>
+          <div class="value">${(d.total_orders).toLocaleString()}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Unidades vendidas</div>
+          <div class="value" style="color:var(--cyan)">${(d.total_units).toLocaleString()}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Ingresos totales</div>
+          <div class="value" style="color:var(--green)">$${Number(d.total_revenue).toLocaleString('es-MX', {maximumFractionDigits:0})}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Productos</div>
+          <div class="value">${d.unique_products}</div>
+        </div>
+      `;
+    }
+
+    function updatePareto(idx) {
+      const { products } = tabState[idx];
+      const key = currentMode === 'units' ? 'cum_pct_units' : 'cum_pct_revenue';
+      const label = currentMode === 'units' ? 'unidades' : 'ingresos';
+      const total = products.length;
+
+      let lines = [];
+      for (const threshold of [50, 80, 90]) {
+        let count = 0;
+        for (const p of products) {
+          count++;
+          if (p[key] >= threshold) break;
+        }
+        const pctCatalog = (count / total * 100).toFixed(1);
+        lines.push(`<strong>${threshold}%</strong> de ${label} → <span class="highlight">${count} productos</span> (${pctCatalog}% del catálogo)`);
+      }
+      document.getElementById(`pareto-${idx}`).innerHTML = lines.join('&nbsp;&nbsp;|&nbsp;&nbsp;');
+    }
+
+    function switchTab(idx) {
+      document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', i === idx));
+      document.querySelectorAll('.tab-panel').forEach((p, i) => p.classList.toggle('active', i === idx));
+      $.fn.dataTable.tables({ visible: true, api: true }).columns.adjust();
+    }
+
+    function statusTag(s) {
+      const cls = { active:'tag-active', paused:'tag-paused', closed:'tag-closed', inactive:'tag-inactive' }[s] || 'tag-inactive';
+      return `<span class="tag ${cls}">${s}</span>`;
+    }
+
+    function esc(s) {
+      if (!s) return '—';
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    loadEstrella();
+  </script>
+</body>
+</html>
