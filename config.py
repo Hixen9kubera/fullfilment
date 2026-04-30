@@ -6,9 +6,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load env vars from sales-dashboard/.env
-_env_path = Path(__file__).resolve().parent.parent / "sales-dashboard" / ".env"
-load_dotenv(_env_path)
+# Load env vars from sales-dashboard/.env first, then override with local fulfillment/.env
+_sales_env = Path(__file__).resolve().parent.parent / "sales-dashboard" / ".env"
+_local_env = Path(__file__).resolve().parent / ".env"
+load_dotenv(_sales_env)
+load_dotenv(_local_env, override=True)
 
 # Make ml_token_manager importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sales-dashboard"))
@@ -27,3 +29,6 @@ ODOO_URL = os.environ.get("ODOO_URL", "")
 ODOO_DB = os.environ.get("ODOO_DB", "")
 ODOO_USER = os.environ.get("ODOO_USER", "")
 ODOO_PASSWORD = os.environ.get("ODOO_PASSWORD", "")
+
+# -- Anthropic (recomendador) --
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")

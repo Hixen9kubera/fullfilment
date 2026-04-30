@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kubera – Recomendador IA</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e4e4e7;
+      --muted: #71717a;
+      --accent: #3b82f6;
+      --green: #22c55e;
+      --yellow: #eab308;
+      --red: #ef4444;
+      --purple: #a78bfa;
+      --cyan: #06b6d4;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+      max-width: 1400px; margin: 0 auto;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 6px; }
+    .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; }
+    a.back { color: var(--accent); font-size: 0.85rem; text-decoration: none; border: 1px solid var(--border); padding: 4px 12px; border-radius: 6px; }
+
+    .config-panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 18px; margin-bottom: 20px;
+    }
+    .config-panel h2 {
+      font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 12px;
+    }
+    .cap-grid {
+      display: grid; grid-template-columns: 180px repeat(3, 1fr); gap: 10px 16px;
+      font-size: 0.85rem; align-items: center;
+    }
+    .cap-grid .header { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .cap-grid input {
+      background: var(--bg); color: var(--accent); border: 1px solid var(--border);
+      border-radius: 4px; padding: 6px 10px; width: 100%;
+      font-size: 0.85rem; font-family: inherit; text-align: right;
+    }
+    .cap-grid input:focus { outline: none; border-color: var(--accent); }
+
+    button.primary {
+      background: var(--accent); color: white; border: none; padding: 10px 24px;
+      border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;
+      margin-top: 16px; font-family: inherit;
+    }
+    button.primary:hover { background: #2563eb; }
+    button.primary:disabled { background: var(--border); cursor: not-allowed; }
+
+    .loading { text-align: center; padding: 60px; color: var(--muted); }
+    .spinner {
+      display: inline-block; width: 32px; height: 32px;
+      border: 3px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .summary {
+      background: linear-gradient(135deg, rgba(34,197,94,0.08), rgba(6,182,212,0.05));
+      border: 1px solid rgba(34,197,94,0.25);
+      border-radius: 8px; padding: 18px 22px; margin-bottom: 24px;
+    }
+    .summary h2 { font-size: 1rem; color: var(--green); margin-bottom: 10px; }
+    .summary .text { font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap; }
+    .summary .meta { font-size: 0.7rem; color: var(--muted); margin-top: 12px; }
+    .summary.error { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.3); }
+    .summary.error h2 { color: var(--red); }
+
+    .account-section {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 18px; margin-bottom: 18px;
+    }
+    .account-section h3 {
+      font-size: 0.95rem; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
+    }
+    .bucket-row {
+      display: grid; grid-template-columns: 140px 1fr; gap: 16px; padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .bucket-row:last-child { border-bottom: none; }
+    .bucket-header { font-weight: 600; font-size: 0.85rem; }
+    .bucket-stats {
+      font-size: 0.75rem; color: var(--muted); margin-top: 4px;
+    }
+    .bucket-stats .hi { color: var(--green); font-weight: 600; }
+    .bucket-stats .lo { color: var(--yellow); font-weight: 600; }
+
+    table {
+      width: 100%; border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    table thead th {
+      background: var(--bg); color: var(--muted);
+      padding: 8px 10px; text-align: left;
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border); white-space: nowrap;
+    }
+    table tbody td {
+      padding: 7px 10px; border-bottom: 1px solid var(--border);
+    }
+    table tbody tr:hover td { background: rgba(59,130,246,0.05); }
+    .rank { color: var(--muted); font-family: monospace; }
+    .sku-cell { font-family: monospace; font-size: 0.75rem; color: var(--accent); }
+    .qty-cell { color: var(--green); font-weight: 700; text-align: right; }
+    .dt-right { text-align: right; }
+    .tag {
+      display: inline-block; padding: 1px 6px; border-radius: 3px;
+      font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+    }
+    .tag-active { background: rgba(34,197,94,0.15); color: var(--green); }
+    .tag-paused { background: rgba(234,179,8,0.15); color: var(--yellow); }
+    .days-old { color: var(--red); font-weight: 600; }
+    .days-warn { color: var(--yellow); }
+    .empty { color: var(--muted); padding: 14px 10px; font-size: 0.85rem; font-style: italic; }
+
+    /* Stacked bar */
+    .stack-wrap { margin: 10px 0 14px; }
+    .stack-labels {
+      display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .stack-bar {
+      position: relative; height: 26px; background: var(--bg);
+      border: 1px solid var(--border); border-radius: 4px; overflow: hidden;
+      display: flex;
+    }
+    .stack-seg {
+      height: 100%; display: flex; align-items: center; justify-content: center;
+      overflow: hidden; white-space: nowrap; font-size: 0.7rem; font-weight: 600;
+      color: rgba(0,0,0,0.75); cursor: help; transition: filter .15s;
+      border-right: 1px solid rgba(0,0,0,0.15);
+    }
+    .stack-seg:hover { filter: brightness(1.15); }
+    .stack-seg.current { background: #475569; color: #cbd5e1; border-right-color: rgba(255,255,255,0.15); }
+    .stack-marker {
+      position: absolute; top: -3px; bottom: -3px; width: 2px;
+      pointer-events: none;
+    }
+    .stack-marker.m85 { background: var(--green); }
+    .stack-marker.m90 { background: var(--cyan); }
+    .stack-marker-label {
+      position: absolute; top: 28px; font-size: 0.65rem; font-weight: 600;
+      transform: translateX(-50%); white-space: nowrap;
+    }
+
+    /* Revenue callout */
+    .rev-callout {
+      display: flex; gap: 20px; flex-wrap: wrap;
+      padding: 14px 16px; background: rgba(34,197,94,0.06);
+      border: 1px solid rgba(34,197,94,0.2); border-radius: 6px;
+      margin: 8px 0 14px; font-size: 0.82rem;
+    }
+    .rev-callout .item { display: flex; flex-direction: column; gap: 2px; }
+    .rev-callout .label { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .rev-callout .value { font-size: 1.05rem; font-weight: 700; color: var(--green); }
+    .rev-callout .value.neutral { color: var(--text); }
+
+    /* Claude markdown */
+    .summary .text h2 { font-size: 0.95rem; color: var(--cyan); margin: 14px 0 6px; }
+    .summary .text h3 { font-size: 0.85rem; color: var(--text); margin: 10px 0 4px; }
+    .summary .text strong { color: var(--text); }
+    .summary .text ul { margin: 4px 0 8px 20px; }
+    .summary .text li { margin: 3px 0; }
+  </style>
+</head>
+<body>
+  <div style="display:flex; align-items:center; gap:16px; margin-bottom:6px;">
+    <h1>Recomendador IA · Reposición a Full</h1>
+    <a class="back" href="/">← Inventario</a>
+  </div>
+  <p class="subtitle">Algoritmo determinístico + resumen ejecutivo con Claude. Objetivo: llenar al 90% con los SKUs de mayor ROI.</p>
+
+  <div class="config-panel" id="config">
+    <h2>Capacidad por cuenta (unidades)</h2>
+    <div id="cap-grid"></div>
+    <button class="primary" id="run-btn">Generar recomendación</button>
+  </div>
+
+  <div id="output"></div>
+
+  <script>
+    const LS_KEY = 'kubera.capacity.v1';
+    const CUENTAS = ['BEKURA', 'SANCORFASHION'];
+
+    function loadCapacity() {
+      try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }
+      catch { return {}; }
+    }
+    function saveCapacity(obj) { localStorage.setItem(LS_KEY, JSON.stringify(obj)); }
+    function getCap(cuenta, bucket, fb = 0) {
+      const c = loadCapacity();
+      return (c[cuenta] && c[cuenta][bucket] != null) ? Number(c[cuenta][bucket]) : fb;
+    }
+    function setCap(cuenta, bucket, v) {
+      const c = loadCapacity();
+      if (!c[cuenta]) c[cuenta] = {};
+      c[cuenta][bucket] = Number(v) || 0;
+      saveCapacity(c);
+    }
+
+    function renderCapGrid() {
+      const grid = document.getElementById('cap-grid');
+      grid.className = 'cap-grid';
+      grid.innerHTML = `
+        <div></div>
+        <div class="header">Pequeños/Medianos</div>
+        <div class="header">Grandes/Extragrandes</div>
+        <div class="header">Total</div>
+      `;
+      CUENTAS.forEach(cuenta => {
+        const pm = getCap(cuenta, 'PM', 0);
+        const gxg = getCap(cuenta, 'GXG', 0);
+        grid.insertAdjacentHTML('beforeend', `
+          <div>${cuenta}</div>
+          <div><input type="number" min="0" step="1" value="${pm}" data-cuenta="${cuenta}" data-bucket="PM"></div>
+          <div><input type="number" min="0" step="1" value="${gxg}" data-cuenta="${cuenta}" data-bucket="GXG"></div>
+          <div style="color:var(--muted); font-family:monospace; text-align:right;" id="total-${cuenta}">${(pm+gxg).toLocaleString()}</div>
+        `);
+      });
+      grid.querySelectorAll('input').forEach(inp => {
+        inp.addEventListener('change', e => {
+          setCap(e.target.dataset.cuenta, e.target.dataset.bucket, e.target.value);
+          const cuenta = e.target.dataset.cuenta;
+          const t = document.getElementById(`total-${cuenta}`);
+          if (t) t.textContent = (getCap(cuenta, 'PM') + getCap(cuenta, 'GXG')).toLocaleString();
+        });
+      });
+    }
+
+    async function runRecomendacion() {
+      const capacities = CUENTAS.map(c => ({
+        cuenta: c,
+        capacity_pm: getCap(c, 'PM', 0),
+        capacity_gxg: getCap(c, 'GXG', 0),
+      }));
+      if (capacities.every(c => c.capacity_pm === 0 && c.capacity_gxg === 0)) {
+        alert('Primero configurá la capacidad de al menos una cuenta.');
+        return;
+      }
+
+      const btn = document.getElementById('run-btn');
+      btn.disabled = true;
+      btn.textContent = 'Calculando...';
+      const out = document.getElementById('output');
+      out.innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+          <div>Consultando ML y Odoo, calculando plan y generando resumen con Claude...</div>
+        </div>`;
+
+      try {
+        const resp = await fetch('/api/recomendador', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({capacities, include_summary: true}),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+        const data = await resp.json();
+        renderOutput(data);
+      } catch (err) {
+        out.innerHTML = `<div style="color:var(--red); padding:20px;">Error: ${err.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generar recomendación';
+      }
+    }
+
+    function renderOutput(data) {
+      const out = document.getElementById('output');
+      let html = '';
+
+      if (data.summary) {
+        if (data.summary.error) {
+          html += `
+            <div class="summary error">
+              <h2>Resumen Claude — no disponible</h2>
+              <div class="text">${escHtml(data.summary.error)}</div>
+            </div>`;
+        } else {
+          html += `
+            <div class="summary">
+              <h2>Resumen ejecutivo (Claude)</h2>
+              <div class="text">${renderMarkdown(data.summary.text)}</div>
+              <div class="meta">
+                ${data.summary.model} · ${data.summary.usage.input_tokens} tokens in / ${data.summary.usage.output_tokens} out
+              </div>
+            </div>`;
+        }
+      }
+
+      for (const name of Object.keys(data.plan)) {
+        const acct = data.plan[name];
+        const totals = acct.totals || {};
+        html += `
+          <div class="account-section">
+            <h3>${name}</h3>
+            <div class="rev-callout">
+              <div class="item">
+                <div class="label">Unidades a enviar</div>
+                <div class="value neutral">${(totals.planned_units||0).toLocaleString()}</div>
+              </div>
+              <div class="item">
+                <div class="label">Ingreso mensual esperado</div>
+                <div class="value">${fmtMoney(totals.planned_expected_monthly_revenue||0)}</div>
+              </div>
+              <div class="item">
+                <div class="label">Anualizado</div>
+                <div class="value">${fmtMoney(totals.planned_expected_annual_revenue||0)}</div>
+              </div>
+            </div>
+            ${renderBucket('Pequeños / Medianos', acct.PM)}
+            ${renderBucket('Grandes / Extragrandes', acct.GXG)}
+            ${acct.unknown_stock > 0 ? `<div style="color:var(--muted); font-size:0.75rem; padding-top:8px;">⚠ ${acct.unknown_stock.toLocaleString()} unidades en Full sin clasificación de tamaño (dimensiones faltantes en ML)</div>` : ''}
+          </div>`;
+      }
+
+      out.innerHTML = html;
+    }
+
+    // Color palette for stacked bar segments (deterministic by index)
+    const SEG_COLORS = [
+      '#22c55e','#06b6d4','#3b82f6','#a78bfa','#eab308',
+      '#f97316','#ec4899','#14b8a6','#f59e0b','#8b5cf6',
+      '#10b981','#6366f1','#d946ef','#0ea5e9','#84cc16',
+    ];
+
+    function renderStackedBar(b) {
+      // Bar represents 100% of capacity. Segments:
+      //  - Current stock (gray)
+      //  - One segment per item in the plan (colored)
+      //  - Empty to capacity
+      //  - Markers at 85% and 90%
+      const cap = b.capacity;
+      if (!cap) return '';
+      const currentPct = (b.current_stock / cap) * 100;
+      const segments = [];
+      if (b.current_stock > 0) {
+        segments.push(`
+          <div class="stack-seg current" style="width:${currentPct}%"
+               title="Stock actual: ${b.current_stock.toLocaleString()} u. (${currentPct.toFixed(1)}% de capacidad)">
+            ${currentPct >= 4 ? 'Actual' : ''}
+          </div>`);
+      }
+      b.plan.forEach((p, i) => {
+        const pctOfCap = (p.recommended_qty / cap) * 100;
+        const color = SEG_COLORS[i % SEG_COLORS.length];
+        const pctOf85 = (p.pct_of_target_min * 100).toFixed(1);
+        const tip = `${p.sku} · ${p.recommended_qty} u. (${pctOf85}% del 85%) · ${fmtMoney(p.expected_monthly_revenue)}/mes`;
+        segments.push(`
+          <div class="stack-seg" style="width:${pctOfCap}%; background:${color}" title="${escHtml(tip)}">
+            ${pctOfCap >= 3 ? p.sku.slice(0,8) : ''}
+          </div>`);
+      });
+      return `
+        <div class="stack-wrap">
+          <div class="stack-labels">
+            <span>0</span>
+            <span>${Math.round(cap/2).toLocaleString()}</span>
+            <span>${cap.toLocaleString()} (100%)</span>
+          </div>
+          <div class="stack-bar">
+            ${segments.join('')}
+            <div class="stack-marker m85" style="left:85%">
+              <div class="stack-marker-label" style="color:var(--green)">85% mín</div>
+            </div>
+            <div class="stack-marker m90" style="left:90%">
+              <div class="stack-marker-label" style="color:var(--cyan); top:40px;">90% ideal</div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function renderBucket(label, b) {
+      const stats = `
+        Capacidad <b>${b.capacity.toLocaleString()}</b> ·
+        Actual <b>${b.current_stock.toLocaleString()}</b> (${(b.current_pct_of_min*100).toFixed(0)}% del 85%) ·
+        A enviar <b class="hi">${b.planned_units.toLocaleString()}</b> ·
+        Proyectado <b class="${b.projected_pct >= 0.85 ? 'hi' : 'lo'}">${(b.projected_pct*100).toFixed(1)}%</b> ·
+        vs 85% <b class="${b.fill_vs_min_pct >= 1.0 ? 'hi' : 'lo'}">${(b.fill_vs_min_pct*100).toFixed(0)}%</b> ·
+        Ingreso esperado <b class="hi">${fmtMoney(b.planned_expected_monthly_revenue)}/mes</b>
+      `;
+      const table = b.plan.length === 0
+        ? `<div class="empty">Sin items candidatos (puede que ya estés al 90% o no haya stock en Odoo).</div>`
+        : `<table>
+             <thead><tr>
+               <th>#</th><th>SKU</th><th>Título</th><th>Estado</th>
+               <th class="dt-right">Uds/mes</th><th class="dt-right">Stock Full</th>
+               <th class="dt-right">Stock Odoo</th><th class="dt-right">Días Odoo</th>
+               <th class="dt-right">Enviar</th><th class="dt-right">% del 85%</th>
+               <th class="dt-right">$Mensual</th><th>Razón</th>
+             </tr></thead>
+             <tbody>
+               ${b.plan.map((p, i) => `
+                 <tr>
+                   <td class="rank">${i+1}</td>
+                   <td class="sku-cell">${escHtml(p.sku)}</td>
+                   <td>${escHtml((p.title || '').slice(0, 50))}</td>
+                   <td>${statusTag(p.status)}</td>
+                   <td class="dt-right">${p.monthly_sales}</td>
+                   <td class="dt-right">${p.stock_full.toLocaleString()}</td>
+                   <td class="dt-right">${p.stock_odoo.toLocaleString()}</td>
+                   <td class="dt-right">${odooDays(p.odoo_days)}</td>
+                   <td class="qty-cell">${p.recommended_qty}</td>
+                   <td class="dt-right" style="color:var(--purple);">${(p.pct_of_target_min*100).toFixed(1)}%</td>
+                   <td class="dt-right" style="color:${p.expected_monthly_revenue>0?'var(--green)':'var(--muted)'};">${p.expected_monthly_revenue>0?fmtMoney(p.expected_monthly_revenue):'—'}</td>
+                   <td style="color:var(--muted); font-size:0.72rem;">${escHtml(p.reason)}</td>
+                 </tr>`).join('')}
+             </tbody>
+           </table>`;
+      return `
+        <div class="bucket-row">
+          <div>
+            <div class="bucket-header">${label}</div>
+            <div class="bucket-stats">${b.candidates_considered} candidatos</div>
+          </div>
+          <div>
+            <div class="bucket-stats" style="margin-bottom:4px;">${stats}</div>
+            ${renderStackedBar(b)}
+            ${table}
+          </div>
+        </div>`;
+    }
+
+    function fmtMoney(n) {
+      if (!n) return '$0';
+      return '$' + Math.round(n).toLocaleString('es-MX');
+    }
+
+    function statusTag(s) {
+      const cls = { active: 'tag-active', paused: 'tag-paused' }[s] || '';
+      return `<span class="tag ${cls}">${s}</span>`;
+    }
+    function odooDays(d) {
+      if (d == null) return '—';
+      const cls = d >= 60 ? 'days-old' : d >= 45 ? 'days-warn' : '';
+      return `<span class="${cls}">${d}d</span>`;
+    }
+    function escHtml(s) {
+      if (s == null) return '';
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // Very small markdown → HTML: headings, bold, bullet lists, paragraphs.
+    function renderMarkdown(src) {
+      if (!src) return '';
+      const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const lines = src.split('\n');
+      let html = '';
+      let inList = false;
+      const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+      const inline = t => esc(t)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>');
+      for (const raw of lines) {
+        const line = raw.trimEnd();
+        if (!line.trim()) { closeList(); continue; }
+        let m;
+        if ((m = line.match(/^##\s+(.*)$/))) { closeList(); html += `<h2>${inline(m[1])}</h2>`; continue; }
+        if ((m = line.match(/^###\s+(.*)$/))) { closeList(); html += `<h3>${inline(m[1])}</h3>`; continue; }
+        if ((m = line.match(/^\s*[-*]\s+(.*)$/))) {
+          if (!inList) { html += '<ul>'; inList = true; }
+          html += `<li>${inline(m[1])}</li>`; continue;
+        }
+        closeList();
+        html += `<p>${inline(line)}</p>`;
+      }
+      closeList();
+      return html;
+    }
+
+    renderCapGrid();
+    document.getElementById('run-btn').addEventListener('click', runRecomendacion);
+  </script>
+</body>
+</html>

@@ -17,12 +17,18 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from .config import CUENTAS
-from .ml_stock import fetch_stock_for_account
-from .ml_ventas import fetch_all_orders_history, fetch_monthly_sales_by_item
-from .odoo_stock import fetch_odoo_stock_by_sku
-from .ml_stock import router as ml_stock_router
-from .ml_ventas import router as ml_ventas_router
-from .odoo_stock import router as odoo_router
+from .api.odoo_stock import fetch_odoo_oldest_in_date_by_sku, fetch_odoo_stock_by_sku, fetch_odoo_weight_by_sku
+from .api.ml_stock import router as ml_stock_router
+from .api.ml_ventas import router as ml_ventas_router
+from .api.odoo_stock import router as odoo_router
+from .routers.recomendador import router as recomendador_router
+from .routers.reports import router as reports_router
+from .restock.router import router as restock_router
+from .restock.supabase_queries import (
+    fetch_dashboard_stock,
+    fetch_dashboard_monthly_sales,
+    fetch_estrella_data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,82 +36,177 @@ app = FastAPI(title="Kubera Fulfillment")
 app.include_router(ml_stock_router)
 app.include_router(ml_ventas_router)
 app.include_router(odoo_router)
+app.include_router(recomendador_router)
+app.include_router(reports_router)
+app.include_router(restock_router)
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
 
 # ======================================================================
-# Dashboard – combined stock + monthly sales table
+# Dashboard – combined stock + monthly sales table (Supabase-backed)
 # ======================================================================
 
-def _build_dashboard_data(cuenta: str, odoo_stock: dict[str, float]) -> dict:
-    stock_data = fetch_stock_for_account(cuenta)
-    monthly = fetch_monthly_sales_by_item(cuenta)
-    sales_map = monthly["sales"]
-    revenue_map = monthly["revenue"]
-    sku_map = monthly["skus"]
+def _build_dashboard_data(
+    cuenta: str,
+    stock_rows: list[dict],
+    sales_rows: list[dict],
+    odoo_stock: dict[str, float],
+    odoo_days: dict[str, int],
+    odoo_weight: dict[str, float] | None = None,
+) -> dict:
+    # Build sales lookup maps for this account
+    sales_map: dict[str, int] = {}
+    revenue_map: dict[str, float] = {}
+    sku_from_sales: dict[str, str] = {}
+    for s in sales_rows:
+        if s["cuenta"] != cuenta:
+            continue
+        iid = s["item_id"]
+        sales_map[iid] = sales_map.get(iid, 0) + (s.get("units_sold") or 0)
+        revenue_map[iid] = revenue_map.get(iid, 0) + float(s.get("revenue") or 0)
+        if s.get("sku"):
+            sku_from_sales[iid] = s["sku"]
 
     now = datetime.now(timezone.utc)
     rows = []
 
-    for product in stock_data["products"]:
-        item_id = product["item_id"]
-        start_time = product.get("start_time")
+    for p in stock_rows:
+        if p["cuenta"] != cuenta:
+            continue
+
+        item_id = p["item_id"]
+        sku = p.get("sku") or sku_from_sales.get(item_id, "—")
+
+        start_time = p.get("start_time")
         days_published = None
         if start_time:
             try:
-                dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                days_published = (now - dt).days
+                dt = datetime.fromisoformat(str(start_time).replace("Z", "+00:00"))
+                days_published = (now - dt.astimezone(timezone.utc)).days
             except (ValueError, TypeError):
                 pass
 
-        sku = sku_map.get(item_id, "—")
         odoo_qty = odoo_stock.get(sku, 0) if sku != "—" else 0
+        odoo_age = odoo_days.get(sku) if sku != "—" else None
+        odoo_kg = (odoo_weight or {}).get(sku) if sku != "—" else None
 
-        rows.append(
-            {
-                "item_id": item_id,
-                "sku": sku,
-                "title": product["title"],
-                "status": product["status"],
-                "logistic_type": product["logistic_type"],
-                "warehouse": product["warehouse"],
-                "start_time": start_time,
-                "days_published": days_published,
-                "monthly_sales": sales_map.get(item_id, 0),
-                "monthly_revenue": revenue_map.get(item_id, 0),
-                "stock_full": product["stock_full"],
-                "stock_odoo": odoo_qty,
-                "price": product["price"],
-                "dimensions": product.get("dimensions") or "—",
-            }
-        )
+        rows.append({
+            "item_id": item_id,
+            "sku": sku,
+            "title": p.get("title") or "—",
+            "status": p.get("status"),
+            "logistic_type": p.get("logistic_type"),
+            "warehouse": p.get("warehouse") or "—",
+            "start_time": start_time,
+            "days_published": days_published,
+            "monthly_sales": sales_map.get(item_id, 0),
+            "monthly_revenue": revenue_map.get(item_id, 0),
+            "stock_full": p.get("stock_full") or 0,
+            "stock_odoo": odoo_qty,
+            "odoo_days": odoo_age,
+            "price": p.get("price"),
+            "dimensions": p.get("dimensions") or "—",
+            "weight_odoo": odoo_kg,
+            "size_category": p.get("size_category") or "unknown",
+        })
 
     rows.sort(key=lambda r: r["stock_full"], reverse=True)
 
     return {
         "cuenta": cuenta,
-        "seller_id": stock_data["seller_id"],
+        "seller_id": None,
         "total_items": len(rows),
         "rows": rows,
     }
 
 
+def _build_combined_rows(accounts: list[dict]) -> list[dict]:
+    """Merge rows across accounts by SKU. Items with SKU='—' are kept separate by item_id."""
+    merged: dict[str, dict] = {}
+    for acct in accounts:
+        for r in acct["rows"]:
+            key = r["sku"] if r["sku"] != "—" else f"__noSku__{r['item_id']}"
+            if key not in merged:
+                merged[key] = {
+                    "sku": r["sku"],
+                    "title": r["title"],
+                    "size_category": r["size_category"],
+                    "status": r["status"],
+                    "logistic_type": r["logistic_type"],
+                    "stock_full": 0,
+                    "stock_odoo": r["stock_odoo"],  # Odoo is shared, not summed
+                    "odoo_days": r["odoo_days"],
+                    "weight_odoo": r.get("weight_odoo"),
+                    "monthly_sales": 0,
+                    "monthly_revenue": 0,
+                    "price": r["price"],
+                    "dimensions": r["dimensions"],
+                    "cuentas": [],
+                    "items": [],
+                }
+            m = merged[key]
+            m["stock_full"] += r["stock_full"]
+            m["monthly_sales"] += r["monthly_sales"]
+            m["monthly_revenue"] += r["monthly_revenue"]
+            m["cuentas"].append(acct["cuenta"])
+            m["items"].append(
+                {
+                    "cuenta": acct["cuenta"],
+                    "item_id": r["item_id"],
+                    "status": r["status"],
+                    "logistic_type": r["logistic_type"],
+                    "stock_full": r["stock_full"],
+                    "monthly_sales": r["monthly_sales"],
+                }
+            )
+            # Promote to "active" if any of the accounts has it active
+            if r["status"] == "active":
+                m["status"] = "active"
+            # Promote to fulfillment if any account has it on Full
+            if r["logistic_type"] == "fulfillment":
+                m["logistic_type"] = "fulfillment"
+
+    rows = list(merged.values())
+    for r in rows:
+        r["cuentas"] = sorted(set(r["cuentas"]))
+    rows.sort(key=lambda r: r["stock_full"], reverse=True)
+    return rows
+
+
 @app.get("/api/dashboard/ml")
 async def dashboard_data():
     loop = asyncio.get_event_loop()
-    odoo_stock = await loop.run_in_executor(None, fetch_odoo_stock_by_sku)
-    tasks = [
-        loop.run_in_executor(None, _build_dashboard_data, c, odoo_stock)
-        for c in CUENTAS
-    ]
     try:
-        results = await asyncio.gather(*tasks)
+        # Odoo (3 bulk calls, fast) + Supabase queries — all in parallel
+        odoo_stock, odoo_days, odoo_weight, stock_rows, sales_rows = await asyncio.gather(
+            loop.run_in_executor(None, fetch_odoo_stock_by_sku),
+            loop.run_in_executor(None, fetch_odoo_oldest_in_date_by_sku),
+            loop.run_in_executor(None, fetch_odoo_weight_by_sku),
+            loop.run_in_executor(None, fetch_dashboard_stock),
+            loop.run_in_executor(None, fetch_dashboard_monthly_sales),
+        )
     except Exception as exc:
-        logger.exception("Error building dashboard")
+        logger.exception("Error fetching dashboard data")
         raise HTTPException(status_code=502, detail=str(exc))
 
-    return {"fecha_consulta": datetime.now(timezone.utc).isoformat(), "cuentas": results}
+    results = [
+        _build_dashboard_data(c, stock_rows, sales_rows, odoo_stock, odoo_days, odoo_weight)
+        for c in CUENTAS
+    ]
+
+    combined_rows = _build_combined_rows(results)
+    combined = {
+        "cuenta": "AMBAS",
+        "seller_id": None,
+        "total_items": len(combined_rows),
+        "rows": combined_rows,
+    }
+
+    return {
+        "fecha_consulta": datetime.now(timezone.utc).isoformat(),
+        "cuentas": results + [combined],
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -114,73 +215,43 @@ async def dashboard(request: Request):
 
 
 # ======================================================================
-# Productos Estrella – all-time sales analysis
+# Productos Estrella – all-time sales analysis (Supabase-backed)
 # ======================================================================
 
-def _analyze_estrella(cuenta: str) -> dict:
-    """Analyze all historical orders for one account. No item detail calls."""
-    orders = fetch_all_orders_history(cuenta)
+def _analyze_estrella(cuenta: str, rows: list[dict]) -> dict:
+    """Build estrella analysis from pre-aggregated Supabase rows."""
+    now = datetime.now(timezone.utc).date()
 
-    item_units: dict[str, int] = defaultdict(int)
-    item_revenue: dict[str, float] = defaultdict(float)
-    item_skus: dict[str, str] = {}
-    item_titles: dict[str, str] = {}
-    item_first_sale: dict[str, datetime] = {}
-
-    for order in orders:
-        order_date = order.get("date_created", "")
-        try:
-            dt = datetime.fromisoformat(order_date)
-        except (ValueError, TypeError):
-            dt = None
-
-        for oi in order.get("order_items", []):
-            item = oi.get("item", {})
-            item_id = item.get("id")
-            if not item_id:
-                continue
-            qty = oi.get("quantity", 0)
-            price = oi.get("unit_price", 0)
-            item_units[item_id] += qty
-            item_revenue[item_id] += qty * price
-            sku = item.get("seller_sku")
-            if sku:
-                item_skus[item_id] = sku
-            title = item.get("title")
-            if title:
-                item_titles[item_id] = title
-            if dt and (item_id not in item_first_sale or dt < item_first_sale[item_id]):
-                item_first_sale[item_id] = dt
-
-    now = datetime.now(timezone.utc)
-    total_units = sum(item_units.values())
-    total_revenue = sum(item_revenue.values())
+    total_units = sum(r.get("units_sold") or 0 for r in rows)
+    total_revenue = sum(float(r.get("revenue") or 0) for r in rows)
 
     products = []
-    for item_id in item_units:
-        units = item_units[item_id]
-        revenue = item_revenue[item_id]
-        first = item_first_sale.get(item_id)
-        months_active = max((now - first.astimezone(timezone.utc)).days / 30.0, 1.0) if first else 1.0
+    for r in rows:
+        units = r.get("units_sold") or 0
+        revenue = float(r.get("revenue") or 0)
+        first = r.get("first_sale")
+        if first:
+            if isinstance(first, str):
+                first = datetime.fromisoformat(first).date()
+            months_active = max((now - first).days / 30.0, 1.0)
+        else:
+            months_active = 1.0
 
-        products.append(
-            {
-                "item_id": item_id,
-                "sku": item_skus.get(item_id, "—"),
-                "title": item_titles.get(item_id, "—"),
-                "units_sold": units,
-                "revenue": revenue,
-                "pct_units": round(units / total_units * 100, 2) if total_units else 0,
-                "pct_revenue": round(revenue / total_revenue * 100, 2) if total_revenue else 0,
-                "avg_monthly_units": round(units / months_active, 1),
-                "avg_monthly_revenue": round(revenue / months_active, 0),
-                "months_active": round(months_active, 1),
-            }
-        )
+        products.append({
+            "item_id": r["item_id"],
+            "sku": r.get("sku") or "—",
+            "title": r.get("title") or "—",
+            "units_sold": units,
+            "revenue": revenue,
+            "pct_units": round(units / total_units * 100, 2) if total_units else 0,
+            "pct_revenue": round(revenue / total_revenue * 100, 2) if total_revenue else 0,
+            "avg_monthly_units": round(units / months_active, 1),
+            "avg_monthly_revenue": round(revenue / months_active, 0),
+            "months_active": round(months_active, 1),
+        })
 
     products.sort(key=lambda p: p["units_sold"], reverse=True)
 
-    # Cumulative percentages
     cum_u = 0.0
     cum_r = 0.0
     for p in products:
@@ -191,7 +262,7 @@ def _analyze_estrella(cuenta: str) -> dict:
 
     return {
         "cuenta": cuenta,
-        "total_orders": len(orders),
+        "total_orders": 0,
         "total_units": total_units,
         "total_revenue": total_revenue,
         "unique_products": len(products),
@@ -202,12 +273,16 @@ def _analyze_estrella(cuenta: str) -> dict:
 @app.get("/api/dashboard/estrella")
 async def estrella_data():
     loop = asyncio.get_event_loop()
-    tasks = [loop.run_in_executor(None, _analyze_estrella, c) for c in CUENTAS]
     try:
-        results = await asyncio.gather(*tasks)
+        all_rows = await loop.run_in_executor(None, fetch_estrella_data)
     except Exception as exc:
         logger.exception("Error building estrella")
         raise HTTPException(status_code=502, detail=str(exc))
+
+    results = [
+        _analyze_estrella(c, [r for r in all_rows if r["cuenta"] == c])
+        for c in CUENTAS
+    ]
 
     # Build combined view (merge by SKU)
     sku_data: dict[str, dict] = {}
@@ -262,3 +337,13 @@ async def estrella_data():
 @app.get("/estrella", response_class=HTMLResponse)
 async def estrella_page(request: Request):
     return templates.TemplateResponse(request=request, name="estrella.html")
+
+
+@app.get("/recomendador", response_class=HTMLResponse)
+async def recomendador_page(request: Request):
+    return templates.TemplateResponse(request=request, name="recomendador.html")
+
+
+@app.get("/restock", response_class=HTMLResponse)
+async def restock_page(request: Request):
+    return templates.TemplateResponse(request=request, name="restock_page.html")

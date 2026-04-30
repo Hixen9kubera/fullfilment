@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from .config import CUENTAS, get_ml_manager
+from ..config import CUENTAS, get_ml_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ml/ventas", tags=["ML Ventas"])

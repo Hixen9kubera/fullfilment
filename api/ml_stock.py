@@ -2,11 +2,12 @@
 
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from .config import CUENTAS, get_ml_manager
+from ..config import CUENTAS, get_ml_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ml/stock", tags=["ML Stock"])
@@ -46,10 +47,10 @@ def _extract_dimensions(body: dict) -> str | None:
     """Extract package dimensions from item attributes."""
     attrs = {a["id"]: a.get("value_name") for a in body.get("attributes", [])}
 
-    length = attrs.get("SELLER_PACKAGE_LENGTH") or attrs.get("LENGTH") or attrs.get("TOTAL_LENGTH")
-    width = attrs.get("SELLER_PACKAGE_WIDTH") or attrs.get("WIDTH") or attrs.get("TOTAL_WIDTH")
-    height = attrs.get("SELLER_PACKAGE_HEIGHT") or attrs.get("HEIGHT") or attrs.get("TOTAL_HEIGHT")
-    weight = attrs.get("SELLER_PACKAGE_WEIGHT") or attrs.get("WEIGHT")
+    length = attrs.get("SELLER_PACKAGE_LENGTH")
+    width = attrs.get("SELLER_PACKAGE_WIDTH")
+    height = attrs.get("SELLER_PACKAGE_HEIGHT")
+    weight = attrs.get("SELLER_PACKAGE_WEIGHT")
 
     parts = []
     if length:
@@ -64,19 +65,109 @@ def _extract_dimensions(body: dict) -> str | None:
     return " | ".join(parts) if parts else None
 
 
+def _parse_dim_value(raw: str | None, is_weight: bool = False) -> float | None:
+    """Parse '15 cm' / '500 g' / '1.2 kg' → value in cm (length) or kg (weight)."""
+    if not raw:
+        return None
+    try:
+        parts = str(raw).strip().lower().split()
+        num = float(parts[0].replace(",", "."))
+    except (ValueError, IndexError):
+        return None
+    unit = parts[1] if len(parts) > 1 else ("g" if is_weight else "cm")
+    if is_weight:
+        if unit in ("kg", "kgs"):
+            return num
+        if unit in ("g", "gr", "grs"):
+            return num / 1000.0
+        return num / 1000.0  # assume grams
+    else:
+        if unit == "mm":
+            return num / 10.0
+        if unit in ("m", "mt"):
+            return num * 100.0
+        return num  # assume cm
+
+
+def _extract_dim_numeric(body: dict) -> dict:
+    """Return {length_cm, width_cm, height_cm, weight_kg} or Nones."""
+    attrs_val = {a["id"]: a.get("value_name") for a in body.get("attributes", [])}
+    attrs_struct = {a["id"]: a.get("value_struct") for a in body.get("attributes", [])}
+
+    def _get(*keys, is_weight=False):
+        # Prefer value_struct if present (more reliable)
+        for k in keys:
+            st = attrs_struct.get(k)
+            if st and isinstance(st, dict) and st.get("number") is not None:
+                num = float(st["number"])
+                unit = (st.get("unit") or "").lower()
+                if is_weight:
+                    if unit in ("kg", "kgs"):
+                        return num
+                    if unit in ("g", "gr"):
+                        return num / 1000.0
+                    return num / 1000.0
+                else:
+                    if unit == "mm":
+                        return num / 10.0
+                    if unit in ("m", "mt"):
+                        return num * 100.0
+                    return num
+        for k in keys:
+            parsed = _parse_dim_value(attrs_val.get(k), is_weight=is_weight)
+            if parsed is not None:
+                return parsed
+        return None
+
+    return {
+        "length_cm": _get("SELLER_PACKAGE_LENGTH"),
+        "width_cm": _get("SELLER_PACKAGE_WIDTH"),
+        "height_cm": _get("SELLER_PACKAGE_HEIGHT"),
+        "weight_kg": _get("SELLER_PACKAGE_WEIGHT", is_weight=True),
+    }
+
+
+def _classify_size(dims: dict) -> str:
+    """Return 'P', 'M', 'G', 'XG' per ML official Full tiers, or 'unknown'.
+    Tiers (empaque primario, lados ordenados):
+      Pequeño:     ≤ 12×15×25 cm, ≤ 18 kg
+      Mediano:     ≤ 28×36×51 cm, ≤ 18 kg
+      Grande:      ≤ 50×60×60 cm, ≤ 18 kg
+      Extragrande: > 50×60×60 cm o > 18 kg
+    Missing any dimension → 'unknown'."""
+    l, w, h, kg = dims["length_cm"], dims["width_cm"], dims["height_cm"], dims["weight_kg"]
+    if None in (l, w, h, kg):
+        return "unknown"
+    s = sorted([l, w, h])
+    if kg > 18:
+        return "XG"
+    if s[0] <= 12 and s[1] <= 15 and s[2] <= 25:
+        return "P"
+    if s[0] <= 28 and s[1] <= 36 and s[2] <= 51:
+        return "M"
+    if s[0] <= 50 and s[1] <= 60 and s[2] <= 60:
+        return "G"
+    return "XG"
+
+
 def _fetch_fulfillment_stock(cuenta: str, inventory_ids: list[str]) -> dict[str, int]:
     """Query /inventories/{id}/stock/fulfillment for a list of inventory_ids.
-    Returns {inventory_id: available_quantity}."""
+    Parallelizes with 10 concurrent requests. Returns {inventory_id: available_quantity}."""
     if not inventory_ids:
         return {}
     ml = get_ml_manager(cuenta)
-    stock_map: dict[str, int] = {}
-    for inv_id in inventory_ids:
+
+    def _one(inv_id: str) -> tuple[str, int]:
         try:
             data = ml.get(f"/inventories/{inv_id}/stock/fulfillment")
-            stock_map[inv_id] = data.get("available_quantity", 0)
+            return inv_id, data.get("available_quantity", 0)
         except Exception:
-            stock_map[inv_id] = 0
+            return inv_id, 0
+
+    stock_map: dict[str, int] = {}
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        for inv_id, qty in pool.map(_one, inventory_ids):
+            stock_map[inv_id] = qty
     return stock_map
 
 
@@ -97,7 +188,7 @@ def _discover_warehouses(cuenta: str, fulfillment_item_ids: set[str]) -> tuple[d
     item_warehouse: dict[str, str] = {}
     default_warehouse: str | None = None
     checked_shipments = 0
-    max_shipments = 30  # Check at most 30 shipments
+    max_shipments = 10  # Check at most 10 shipments (was 30; warehouses repeat heavily)
 
     offset = 0
     while checked_shipments < max_shipments:
@@ -207,6 +298,11 @@ def fetch_stock_for_account(cuenta: str) -> dict:
             stock_full = 0
             warehouse = "Seller"
 
+        dim_numeric = _extract_dim_numeric(body)
+        # Extract seller_sku from attributes
+        attrs = {a["id"]: a.get("value_name") for a in body.get("attributes", [])}
+        seller_sku = attrs.get("SELLER_SKU")
+
         products.append(
             {
                 "item_id": item_id,
@@ -219,7 +315,12 @@ def fetch_stock_for_account(cuenta: str) -> dict:
                 "price": body.get("price"),
                 "currency_id": body.get("currency_id"),
                 "start_time": body.get("start_time"),
+                "last_updated": body.get("last_updated"),
+                "date_created": body.get("date_created"),
+                "seller_sku": seller_sku,
                 "dimensions": _extract_dimensions(body),
+                "dim_numeric": dim_numeric,
+                "size_category": _classify_size(dim_numeric),
             }
         )
 

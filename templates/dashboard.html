@@ -42,6 +42,58 @@
     .tab-panel { display: none; padding-top: 20px; }
     .tab-panel.active { display: block; }
 
+    /* Capacity panel */
+    .capacity-panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px 18px; margin-bottom: 14px;
+    }
+    .capacity-title {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 10px;
+    }
+    .capacity-title h3 { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+    .capacity-title .target { color: var(--muted); font-size: 0.75rem; }
+    .capacity-row {
+      display: grid;
+      grid-template-columns: 180px 1fr 140px 70px 70px;
+      gap: 12px; align-items: center; padding: 6px 0;
+    }
+    .capacity-row .label { font-size: 0.8rem; color: var(--text); }
+    .capacity-row .bar {
+      height: 8px; background: var(--border); border-radius: 4px; overflow: hidden;
+    }
+    .capacity-row .bar-fill {
+      height: 100%; transition: width .3s, background .3s;
+    }
+    .capacity-row .fill-low { background: var(--red); }
+    .capacity-row .fill-mid { background: var(--yellow); }
+    .capacity-row .fill-target { background: var(--green); }
+    .capacity-row .fill-over { background: var(--red); }
+    .capacity-row .usage {
+      font-size: 0.78rem; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums;
+    }
+    .capacity-row .pct {
+      font-size: 0.85rem; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums;
+    }
+    .capacity-row input[type="number"] {
+      background: var(--bg); color: var(--accent); border: 1px solid var(--border);
+      border-radius: 4px; padding: 4px 8px; width: 100%;
+      font-size: 0.8rem; font-family: inherit; text-align: right;
+    }
+    .capacity-row input[type="number"]:disabled {
+      color: var(--muted); cursor: not-allowed;
+    }
+    .capacity-row input[type="number"]:focus {
+      outline: none; border-color: var(--accent);
+    }
+    .capacity-summary {
+      display: flex; justify-content: space-between; padding: 10px 0 2px;
+      border-top: 1px solid var(--border); margin-top: 6px; font-size: 0.8rem;
+    }
+    .capacity-summary .status-ok { color: var(--green); }
+    .capacity-summary .status-warn { color: var(--yellow); }
+    .capacity-summary .status-alert { color: var(--red); }
+
     /* Stats */
     .stats { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
     .stat-card {
@@ -75,6 +127,9 @@
     .tag-cross_docking { background: rgba(167,139,250,0.15); color: var(--purple); }
     .tag-drop_off { background: rgba(234,179,8,0.15); color: var(--yellow); }
     .tag-unknown { background: rgba(113,113,122,0.15); color: var(--muted); }
+    .tag-pm { background: rgba(59,130,246,0.15); color: var(--accent); }
+    .tag-gxg { background: rgba(167,139,250,0.15); color: var(--purple); }
+    .tag-nosize { background: rgba(113,113,122,0.15); color: var(--muted); }
 
     /* Loading */
     .loading { text-align: center; padding: 60px; color: var(--muted); }
@@ -127,12 +182,20 @@
     .sku-cell   { font-family: monospace; font-size: 0.78rem; color: var(--accent); }
     .dim-cell   { font-size: 0.72rem; color: var(--muted); }
     .wh-cell    { font-family: monospace; font-size: 0.78rem; color: var(--cyan); }
+    .days-old   { color: var(--red); font-weight: 600; }
+    .days-warn  { color: var(--yellow); font-weight: 600; }
+    .days-ok    { color: var(--muted); }
   </style>
 </head>
 <body>
   <div style="display:flex; align-items:center; gap:16px; margin-bottom:6px;">
     <h1>Inventario MercadoLibre</h1>
     <a href="/estrella" style="color:var(--accent); font-size:0.85rem; text-decoration:none; border:1px solid var(--border); padding:4px 12px; border-radius:6px;">Productos Estrella →</a>
+    <!-- Recomendador IA desactivado — usar CSV + chat de Claude en su lugar
+    <a href="/recomendador" style="color:var(--green); font-size:0.85rem; text-decoration:none; border:1px solid var(--border); padding:4px 12px; border-radius:6px;">Recomendador IA →</a>
+    -->
+    <a href="/restock" style="color:var(--red); font-size:0.85rem; text-decoration:none; border:1px solid var(--border); padding:4px 12px; border-radius:6px;">Restock →</a>
+    <a href="/api/reports/ventas.csv" style="color:var(--purple); font-size:0.85rem; text-decoration:none; border:1px solid var(--border); padding:4px 12px; border-radius:6px;">Descargar CSV ↓</a>
   </div>
   <p class="subtitle" id="fecha">Cargando datos...</p>
 
@@ -149,8 +212,29 @@
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
   <script>
-    // Store references per tab
+    const TARGET_MIN = 0.85;
+    const TARGET_IDEAL = 0.90;
+    const LS_KEY = 'kubera.capacity.v1';
+
     const tabState = [];
+
+    function loadCapacity() {
+      try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }
+      catch { return {}; }
+    }
+    function saveCapacity(obj) {
+      localStorage.setItem(LS_KEY, JSON.stringify(obj));
+    }
+    function getCap(cuenta, bucket, fallback = 0) {
+      const c = loadCapacity();
+      return (c[cuenta] && c[cuenta][bucket] != null) ? Number(c[cuenta][bucket]) : fallback;
+    }
+    function setCap(cuenta, bucket, value) {
+      const c = loadCapacity();
+      if (!c[cuenta]) c[cuenta] = {};
+      c[cuenta][bucket] = Number(value) || 0;
+      saveCapacity(c);
+    }
 
     async function loadDashboard() {
       try {
@@ -167,23 +251,23 @@
         const panelsEl = document.getElementById('panels');
 
         data.cuentas.forEach((cuenta, idx) => {
-          // Tab button
+          const isCombined = cuenta.cuenta === 'AMBAS';
+
           const btn = document.createElement('button');
           btn.className = 'tab' + (idx === 0 ? ' active' : '');
-          btn.textContent = `${cuenta.cuenta} (${cuenta.total_items})`;
+          btn.textContent = `${isCombined ? 'Ambas Tiendas' : cuenta.cuenta} (${cuenta.total_items})`;
           btn.onclick = () => switchTab(idx);
           tabsEl.appendChild(btn);
 
-          // Collect unique values for filters
           const statuses = [...new Set(cuenta.rows.map(r => r.status))].sort();
           const types = [...new Set(cuenta.rows.map(r => r.logistic_type))].sort();
-          const warehouses = [...new Set(cuenta.rows.map(r => r.warehouse))].sort();
+          const sizes = [...new Set(cuenta.rows.map(r => r.size_category))].sort();
 
-          // Panel
           const panel = document.createElement('div');
           panel.className = 'tab-panel' + (idx === 0 ? ' active' : '');
           panel.id = `panel-${idx}`;
           panel.innerHTML = `
+            <div class="capacity-panel" id="capacity-${idx}"></div>
             <div class="stats" id="stats-${idx}"></div>
             <div class="filters">
               <div class="filter-group">
@@ -201,10 +285,10 @@
                 </select>
               </div>
               <div class="filter-group">
-                <label>Bodega</label>
-                <select id="filter-wh-${idx}">
-                  <option value="">Todas</option>
-                  ${warehouses.map(w => `<option value="${w}">${w}</option>`).join('')}
+                <label>Tamaño</label>
+                <select id="filter-size-${idx}">
+                  <option value="">Todos</option>
+                  ${sizes.map(s => `<option value="${s}">${sizeLabel(s)}</option>`).join('')}
                 </select>
               </div>
             </div>
@@ -212,18 +296,19 @@
               <thead>
                 <tr>
                   <th>SKU</th>
+                  ${isCombined ? '<th>Cuentas</th>' : ''}
                   <th>Titulo</th>
+                  <th>Tam</th>
                   <th>Estado</th>
                   <th>Tipo</th>
-                  <th>Bodega</th>
-                  <th>Publicado</th>
-                  <th>Dias</th>
                   <th>Uds 30d</th>
                   <th>$Venta 30d</th>
                   <th>Stock Full</th>
                   <th>Stock Odoo</th>
+                  <th>Días Odoo</th>
                   <th>Precio</th>
-                  <th>Dimensiones</th>
+                  <th>Dims ML</th>
+                  <th>Peso Odoo</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -231,26 +316,38 @@
           `;
           panelsEl.appendChild(panel);
 
-          // Build table data
-          const tableData = cuenta.rows.map(r => [
-            `<span class="sku-cell">${esc(r.sku)}</span>`,
-            esc(r.title),
-            statusTag(r.status),
-            typeTag(r.logistic_type),
-            `<span class="wh-cell">${esc(r.warehouse)}</span>`,
-            r.start_time ? new Date(r.start_time).toLocaleDateString('es-MX') : '—',
-            r.days_published ?? '—',
-            r.monthly_sales,
-            r.monthly_revenue ? `$${Number(r.monthly_revenue).toLocaleString('es-MX', {maximumFractionDigits:0})}` : '$0',
-            stockCell(r.stock_full),
-            odooCell(r.stock_odoo),
-            r.price ? `$${Number(r.price).toLocaleString()}` : '—',
-            `<span class="dim-cell">${esc(r.dimensions)}</span>`,
-          ]);
+          const tableData = cuenta.rows.map(r => {
+            const base = [
+              `<span class="sku-cell">${esc(r.sku)}</span>`,
+            ];
+            if (isCombined) {
+              base.push(`<span style="font-family:monospace;font-size:0.75rem;color:var(--muted)">${(r.cuentas || []).map(c => c.slice(0,3)).join(',')}</span>`);
+            }
+            base.push(
+              esc(r.title),
+              sizeTag(r.size_category),
+              statusTag(r.status),
+              typeTag(r.logistic_type),
+              r.monthly_sales,
+              r.monthly_revenue ? `$${Number(r.monthly_revenue).toLocaleString('es-MX', {maximumFractionDigits:0})}` : '$0',
+              stockCell(r.stock_full),
+              odooCell(r.stock_odoo),
+              odooDaysCell(r.odoo_days),
+              r.price ? `$${Number(r.price).toLocaleString()}` : '—',
+              `<span class="dim-cell">${esc(r.dimensions)}</span>`,
+              r.weight_odoo != null ? `${r.weight_odoo} kg` : '—',
+            );
+            return base;
+          });
+
+          const salesCol = isCombined ? 6 : 5;
+          const rightAlignCols = isCombined
+            ? [6, 7, 8, 9, 10, 11, 13]
+            : [5, 6, 7, 8, 9, 10, 12];
 
           const dt = $(`#table-${idx}`).DataTable({
             data: tableData,
-            order: [[8, 'desc']],
+            order: [[salesCol, 'desc']],
             pageLength: 50,
             language: {
               search: 'Buscar:',
@@ -259,30 +356,31 @@
               paginate: { previous: '<', next: '>' },
             },
             columnDefs: [
-              { targets: [6, 7, 8, 9, 10, 11], className: 'dt-right' },
+              { targets: rightAlignCols, className: 'dt-right' },
             ],
           });
 
-          // Save state
-          tabState.push({ dt, rows: cuenta.rows });
+          tabState.push({ dt, rows: cuenta.rows, cuenta: cuenta.cuenta, isCombined });
 
-          // Wire up filters
+          const sizeColIdx = isCombined ? 3 : 2;
+          const statusColIdx = isCombined ? 4 : 3;
+          const typeColIdx = isCombined ? 5 : 4;
+
           const applyFilters = () => {
             const sf = $(`#filter-status-${idx}`).val();
             const tf = $(`#filter-type-${idx}`).val();
-            const wf = $(`#filter-wh-${idx}`).val();
+            const zf = $(`#filter-size-${idx}`).val();
 
-            // Custom search per column
-            dt.column(2).search(sf ? `^${escRegex(sf)}$` : '', true, false);
-            dt.column(3).search(tf ? `^${escRegex(typeLabel(tf))}$` : '', true, false);
-            dt.column(4).search(wf ? escRegex(wf) : '', true, false);
+            dt.column(statusColIdx).search(sf ? `^${escRegex(sf)}$` : '', true, false);
+            dt.column(typeColIdx).search(tf ? `^${escRegex(typeLabel(tf))}$` : '', true, false);
+            dt.column(sizeColIdx).search(zf ? `^${escRegex(sizeLabel(zf))}$` : '', true, false);
             dt.draw();
             updateStats(idx);
           };
 
-          $(`#filter-status-${idx}, #filter-type-${idx}, #filter-wh-${idx}`).on('change', applyFilters);
+          $(`#filter-status-${idx}, #filter-type-${idx}, #filter-size-${idx}`).on('change', applyFilters);
 
-          // Initial stats
+          renderCapacity(idx);
           updateStats(idx);
         });
       } catch (err) {
@@ -291,9 +389,107 @@
       }
     }
 
+    function computeOccupancy(rows) {
+      let pm = 0, gxg = 0, unknown = 0;
+      for (const r of rows) {
+        if (r.logistic_type !== 'fulfillment') continue;
+        const qty = r.stock_full || 0;
+        if (['P','M'].includes(r.size_category)) pm += qty;
+        else if (['G','XG'].includes(r.size_category)) gxg += qty;
+        else unknown += qty;
+      }
+      return { pm, gxg, unknown };
+    }
+
+    function renderCapacity(idx) {
+      const state = tabState[idx];
+      const occ = computeOccupancy(state.rows);
+
+      let capPM, capGXG, readOnly;
+      if (state.isCombined) {
+        // Sum capacities from the individual tabs
+        capPM = tabState.filter(t => !t.isCombined).reduce((s, t) => s + getCap(t.cuenta, 'PM', 0), 0);
+        capGXG = tabState.filter(t => !t.isCombined).reduce((s, t) => s + getCap(t.cuenta, 'GXG', 0), 0);
+        readOnly = true;
+      } else {
+        capPM = getCap(state.cuenta, 'PM', 0);
+        capGXG = getCap(state.cuenta, 'GXG', 0);
+        readOnly = false;
+      }
+
+      const panel = document.getElementById(`capacity-${idx}`);
+      const renderRow = (label, used, cap, bucket) => {
+        const pct = cap > 0 ? (used / cap) : 0;
+        const pctDisplay = cap > 0 ? `${(pct*100).toFixed(1)}%` : '—';
+        const fillCls =
+          pct >= 1.0 ? 'fill-over' :
+          pct >= TARGET_IDEAL ? 'fill-target' :
+          pct >= TARGET_MIN ? 'fill-target' :
+          pct >= 0.5 ? 'fill-mid' : 'fill-low';
+        const widthPct = Math.min(pct * 100, 100).toFixed(1);
+        return `
+          <div class="capacity-row">
+            <div class="label">${label}</div>
+            <div class="bar"><div class="bar-fill ${fillCls}" style="width:${widthPct}%"></div></div>
+            <div class="usage">${used.toLocaleString()} / ${cap.toLocaleString()}</div>
+            <input type="number" min="0" step="1" value="${cap}"
+              ${readOnly ? 'disabled' : `data-bucket="${bucket}" data-idx="${idx}"`}>
+            <div class="pct">${pctDisplay}</div>
+          </div>
+        `;
+      };
+
+      const totalUsed = occ.pm + occ.gxg + occ.unknown;
+      const totalCap = capPM + capGXG;
+      const totalPct = totalCap > 0 ? (totalUsed / totalCap) : 0;
+      const statusCls =
+        totalPct >= TARGET_IDEAL ? 'status-ok' :
+        totalPct >= TARGET_MIN ? 'status-warn' :
+        'status-alert';
+      const statusMsg =
+        totalPct >= TARGET_IDEAL ? `Ocupación óptima (≥${(TARGET_IDEAL*100).toFixed(0)}%)` :
+        totalPct >= TARGET_MIN ? `Por encima del mínimo pero bajo ideal (${(TARGET_MIN*100).toFixed(0)}–${(TARGET_IDEAL*100).toFixed(0)}%)` :
+        `Debajo del mínimo del ${(TARGET_MIN*100).toFixed(0)}% — falta llenar`;
+
+      const unclassifiedRow = occ.unknown > 0
+        ? `<div class="capacity-row" style="opacity:.7">
+             <div class="label">Sin clasificar</div>
+             <div class="bar"></div>
+             <div class="usage">${occ.unknown.toLocaleString()} u.</div>
+             <div></div>
+             <div class="pct" style="color:var(--muted)">—</div>
+           </div>`
+        : '';
+
+      panel.innerHTML = `
+        <div class="capacity-title">
+          <h3>Capacidad Fulfillment</h3>
+          <span class="target">Target mínimo ${(TARGET_MIN*100).toFixed(0)}% · Ideal ${(TARGET_IDEAL*100).toFixed(0)}%${readOnly ? ' · inputs derivados de las tiendas' : ''}</span>
+        </div>
+        ${renderRow('Pequeños y Medianos', occ.pm, capPM, 'PM')}
+        ${renderRow('Grandes y Extragrandes', occ.gxg, capGXG, 'GXG')}
+        ${unclassifiedRow}
+        <div class="capacity-summary">
+          <span>Total ocupación: <b>${totalUsed.toLocaleString()}</b> / <b>${totalCap.toLocaleString()}</b> (${totalCap ? (totalPct*100).toFixed(1) : '0.0'}%)</span>
+          <span class="${statusCls}">${statusMsg}</span>
+        </div>
+      `;
+
+      if (!readOnly) {
+        panel.querySelectorAll('input[type="number"]').forEach(inp => {
+          inp.addEventListener('change', e => {
+            setCap(state.cuenta, e.target.dataset.bucket, e.target.value);
+            renderCapacity(idx);
+            // Re-render the combined tab if it exists
+            const combinedIdx = tabState.findIndex(t => t.isCombined);
+            if (combinedIdx >= 0) renderCapacity(combinedIdx);
+          });
+        });
+      }
+    }
+
     function updateStats(idx) {
       const { dt, rows } = tabState[idx];
-      // Get filtered row indices
       const filteredIndices = dt.rows({ search: 'applied' }).indexes().toArray();
       const filtered = filteredIndices.map(i => rows[i]);
 
@@ -359,6 +555,14 @@
       return `<span class="tag ${cls}">${label}</span>`;
     }
 
+    function sizeLabel(s) {
+      return { P: 'Pequeño', M: 'Mediano', G: 'Grande', XG: 'Extragrande', unknown: 'S/C' }[s] || s;
+    }
+    function sizeTag(s) {
+      const cls = { P: 'tag-pm', M: 'tag-pm', G: 'tag-gxg', XG: 'tag-gxg', unknown: 'tag-nosize' }[s] || 'tag-nosize';
+      return `<span class="tag ${cls}">${sizeLabel(s)}</span>`;
+    }
+
     function stockCell(qty) {
       if (!qty) return `<span class="stock-low">0</span>`;
       const cls = qty >= 50 ? 'stock-high' : qty >= 10 ? 'stock-mid' : 'stock-low';
@@ -369,6 +573,12 @@
       if (!qty) return `<span class="stock-low">0</span>`;
       const cls = qty >= 50 ? 'stock-odoo' : qty >= 10 ? 'stock-mid' : 'stock-low';
       return `<span class="${cls}">${Number(qty).toLocaleString()}</span>`;
+    }
+
+    function odooDaysCell(days) {
+      if (days == null) return `<span style="color:var(--muted)">—</span>`;
+      const cls = days >= 60 ? 'days-old' : days >= 45 ? 'days-warn' : 'days-ok';
+      return `<span class="${cls}">${days}d</span>`;
     }
 
     function esc(s) {
