@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+jinja2
+python-dotenv
+pydantic
+supabase
+anthropic
+requests
