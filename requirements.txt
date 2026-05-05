@@ -6,3 +6,5 @@ pydantic
 supabase
 anthropic
 requests
+mysql-connector-python
+cryptography
