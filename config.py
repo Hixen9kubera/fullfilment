@@ -8,11 +8,6 @@ from dotenv import load_dotenv
 # Local .env (also accepts vars set directly in the environment, e.g. DigitalOcean App Platform)
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-# Fallback to sales-dashboard/.env for legacy local dev (ignored if not present)
-_legacy_env = Path(__file__).resolve().parent.parent / "sales-dashboard" / ".env"
-if _legacy_env.exists():
-    load_dotenv(_legacy_env)
-
 from .ml_token_manager import MLTokenManager  # noqa: E402
 
 # -- MercadoLibre --

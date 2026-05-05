@@ -22,10 +22,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent / "sales-dashboard" / ".env")
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sales-dashboard"))
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from ml_token_manager import MLTokenManager
+from fulfillment.ml_token_manager import MLTokenManager
 
 CUENTAS = ["BEKURA", "SANCORFASHION"]
 

@@ -18,8 +18,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Cargar .env antes de cualquier import de config
-load_dotenv(Path(__file__).resolve().parents[2] / "sales-dashboard" / ".env")
-load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from ..config import CUENTAS, get_ml_manager  # noqa: E402
 from ..api.ml_stock import fetch_stock_for_account  # noqa: E402

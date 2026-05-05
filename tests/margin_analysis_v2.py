@@ -27,8 +27,7 @@ from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-load_dotenv(Path(__file__).resolve().parents[2] / "sales-dashboard" / ".env")
-load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from fulfillment.restock.db import get_client  # noqa: E402
