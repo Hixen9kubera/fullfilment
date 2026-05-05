@@ -1,20 +1,19 @@
 """Shared configuration – env vars and ML account setup."""
 
 import os
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load env vars from sales-dashboard/.env first, then override with local fulfillment/.env
-_sales_env = Path(__file__).resolve().parent.parent / "sales-dashboard" / ".env"
-_local_env = Path(__file__).resolve().parent / ".env"
-load_dotenv(_sales_env)
-load_dotenv(_local_env, override=True)
+# Local .env (also accepts vars set directly in the environment, e.g. DigitalOcean App Platform)
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
-# Make ml_token_manager importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sales-dashboard"))
-from ml_token_manager import MLTokenManager  # noqa: E402
+# Fallback to sales-dashboard/.env for legacy local dev (ignored if not present)
+_legacy_env = Path(__file__).resolve().parent.parent / "sales-dashboard" / ".env"
+if _legacy_env.exists():
+    load_dotenv(_legacy_env)
+
+from .ml_token_manager import MLTokenManager  # noqa: E402
 
 # -- MercadoLibre --
 CUENTAS = ["BEKURA", "SANCORFASHION"]
