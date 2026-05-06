@@ -1,0 +1,61 @@
+name: Daily ingest ML → Supabase
+
+on:
+  schedule:
+    # 5:00 am America/Mexico_City (UTC-6) → 11:00 UTC
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Repo se clona como ./fulfillment/ porque los imports usan
+      # `from ..config` y requieren que `fulfillment` sea un subpaquete.
+      - uses: actions/checkout@v4
+        with:
+          path: fulfillment
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+
+      - name: Create workspace pyproject.toml
+        run: |
+          cat > pyproject.toml <<'EOF'
+          [project]
+          name = "kubera-fulfillment-runner"
+          version = "0.0.0"
+          requires-python = ">=3.11"
+          dependencies = [
+            "fastapi>=0.111.0",
+            "uvicorn[standard]>=0.29.0",
+            "python-dotenv>=1.0.0",
+            "cryptography>=41.0.0",
+            "mysql-connector-python>=8.3.0",
+            "requests>=2.31.0",
+            "jinja2>=3.1.6",
+            "supabase>=2.0.0",
+            "openpyxl>=3.1.5",
+          ]
+          EOF
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run ingest (last 2 days)
+        env:
+          SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:      ${{ secrets.SUPABASE_KEY }}
+          DB_HOST:           ${{ secrets.DB_HOST }}
+          DB_PORT:           ${{ secrets.DB_PORT }}
+          DB_NAME:           ${{ secrets.DB_NAME }}
+          DB_USER:           ${{ secrets.DB_USER }}
+          DB_PASSWORD:       ${{ secrets.DB_PASSWORD }}
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
+          ODOO_URL:          ${{ secrets.ODOO_URL }}
+          ODOO_DB:           ${{ secrets.ODOO_DB }}
+          ODOO_USER:         ${{ secrets.ODOO_USER }}
+          ODOO_PASSWORD:     ${{ secrets.ODOO_PASSWORD }}
+        run: uv run python -m fulfillment.restock.ingest --days 2
